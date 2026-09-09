@@ -1,10 +1,15 @@
 const { Spellchecker, ALWAYS_USE_HUNSPELL } = require('../lib/spellchecker');
+const spellchecker = require('../lib/spellchecker');
 const path = require('path');
+const fs = require('fs');
 
 const enUS = 'A robot is a mechanical or virtual artificial agent, usually an electronic machine';
 const deDE = 'Ein Roboter ist eine technische Apparatur, die üblicherweise dazu dient, dem Menschen mechanische Arbeit abzunehmen.';
 const frFR = 'Les robots les plus évolués sont capables de se déplacer et de se recharger par eux-mêmes';
 
+// An empty language puts the macOS system checker into automatic per-string
+// language identification, which is what the darwin default is here to
+// exercise. See `useDefaultDictionary` for why Hunspell can't share it.
 const defaultLanguage = process.platform === 'darwin' ? '' : 'en_US';
 const dictionaryDirectory = path.join(__dirname, 'dictionaries');
 
@@ -44,9 +49,48 @@ function isDictionaryAvailable(fixture, locale) {
   return fixture.getAvailableDictionaries().includes(tag);
 }
 
+// Hunspell holds one dictionary at a time and has no equivalent of the macOS
+// checker's automatic language identification, so an empty language just fails
+// to load anything and every word comes back correctly spelled. Name a language
+// for it instead; the specs that rely on this default assert English results.
+function useDefaultDictionary(fixture) {
+  return fixture.setDictionary(
+    spellType === 'hunspell' ? 'en_US' : defaultLanguage,
+    dictionaryDirectory
+  );
+}
+
 const IS_WINDOWS_CI = process.env.CI && process.platform === 'win32';
 
 for (let testAlwaysUseHunspell of [true, false]) {
+  function buildSpellChecker() {
+    const checker = new Spellchecker();
+    if (testAlwaysUseHunspell) {
+      checker.setSpellcheckerType(ALWAYS_USE_HUNSPELL);
+      spellType = 'hunspell';
+      spellIndex = 0;
+    } else {
+      // We can get different results based on using Hunspell, Mac, or Windows
+      // checkers. To simplify the rules, we create a variable that contains
+      // 'hunspell', 'mac', or 'win' for filtering. We also create an index
+      // variable to go into arrays.
+      if (process.env.SPELLCHECKER_PREFER_HUNSPELL) {
+        spellType = 'hunspell';
+        spellIndex = 0;
+      } else if (process.platform === 'darwin') {
+        spellType = 'mac';
+        spellIndex = 1;
+      } else if (process.platform === 'win32') {
+        spellType = 'win';
+        spellIndex = 2;
+      } else {
+        spellType = 'hunspell';
+        spellIndex = 0;
+      }
+    }
+    return checker;
+  }
+
   describe('SpellChecker', () => {
     let fixture;
     describe('.setDictionary', () => {
@@ -87,7 +131,7 @@ for (let testAlwaysUseHunspell of [true, false]) {
     describe('.isMisspelled(word)', () => {
       beforeEach(() => {
         fixture = buildSpellChecker();
-        fixture.setDictionary(defaultLanguage, dictionaryDirectory);
+        useDefaultDictionary(fixture);
       });
 
       it('returns true if the word is mispelled', () => {
@@ -221,11 +265,13 @@ for (let testAlwaysUseHunspell of [true, false]) {
     describe('.checkSpelling(string)', () => {
       beforeEach(() => {
         fixture = buildSpellChecker();
-        fixture.setDictionary(defaultLanguage, dictionaryDirectory);
+        useDefaultDictionary(fixture);
       });
 
       it('automatically detects languages on OS X', () => {
-        if (process.platform !== 'darwin') return;
+        // This is specifically about NSSpellChecker identifying the language of
+        // each string; Hunspell has one dictionary loaded and can't do it.
+        if (spellType !== 'mac') return;
 
         expect(fixture.checkSpelling(enUS)).toEqual([]);
         expect(fixture.checkSpelling(deDE)).toEqual([]);
@@ -461,13 +507,13 @@ for (let testAlwaysUseHunspell of [true, false]) {
       //  ]
 
       it('returns nothing for a pair of 257 1-byte character strings with encoding', () => {
-        if (process.platform !== 'linux') {
-          // de_DE_frami is invalid outside of Hunspell dictionaries.
-          if (spellType !== 'hunspell') return;
+        if (process.platform !== 'linux') return;
+        // We are only testing for allocation errors.
+        // de_DE_frami is invalid outside of Hunspell dictionaries.
+        if (spellType !== 'hunspell') return;
 
-          fixture.setDictionary('de_DE_frami', dictionaryDirectory);
-          expect(fixture.checkSpelling(maximumLength2BytePair)).toEqual([]);
-        }
+        fixture.setDictionary('de_DE_frami', dictionaryDirectory);
+        expect(fixture.checkSpelling(invalidLength1BytePair)).toEqual([]);
       });
 
       it('returns nothing for a pair of 129 2-byte character strings with encoding', () => {
@@ -504,7 +550,7 @@ for (let testAlwaysUseHunspell of [true, false]) {
     describe('.checkSpellingAsync(string)', () => {
       beforeEach(() => {
         fixture = buildSpellChecker();
-        fixture.setDictionary(defaultLanguage, dictionaryDirectory);
+        useDefaultDictionary(fixture);
       });
 
       it('returns an array of character ranges of misspelled words', () => {
@@ -531,7 +577,7 @@ for (let testAlwaysUseHunspell of [true, false]) {
     describe('.getCorrectionsForMisspelling(word)', () => {
       beforeEach(() => {
         fixture = buildSpellChecker();
-        fixture.setDictionary(defaultLanguage, dictionaryDirectory);
+        useDefaultDictionary(fixture);
       });
 
       it('returns an array of possible corrections', () => {
@@ -685,7 +731,7 @@ for (let testAlwaysUseHunspell of [true, false]) {
     describe('.add(word) and .remove(word)', () => {
       beforeEach(() => {
         fixture = buildSpellChecker();
-        fixture.setDictionary(defaultLanguage, dictionaryDirectory);
+        useDefaultDictionary(fixture);
       });
 
       it('allows words to be added and removed to the dictionary', () => {
@@ -727,7 +773,7 @@ for (let testAlwaysUseHunspell of [true, false]) {
     describe('.getAvailableDictionaries()', () => {
       beforeEach(() => {
         fixture = buildSpellChecker();
-        fixture.setDictionary(defaultLanguage, dictionaryDirectory);
+        useDefaultDictionary(fixture);
       });
 
       it('returns an array of string dictionary names', () => {
@@ -747,39 +793,78 @@ for (let testAlwaysUseHunspell of [true, false]) {
     });
 
     describe('.setDictionary(lang, dictDirectory)', () => {
-      it('sets the spell checkers language, and dictionary directory', () => {
+      it('sets the spell checker’s language and dictionary directory', () => {
         // TODO: Well, this sure doesn't do what it claims.
         const awesome = true;
         expect(awesome).toBe(true);
       });
     });
   });
-
-  var buildSpellChecker = function () {
-    const checker = new Spellchecker();
-    if (testAlwaysUseHunspell) {
-      checker.setSpellcheckerType(ALWAYS_USE_HUNSPELL);
-      spellType = 'hunspell';
-      spellIndex = 0;
-    } else {
-      // We can get different results based on using Hunspell, Mac, or Windows
-      // checkers. To simplify the rules, we create a variable that contains
-      // 'hunspell', 'mac', or 'win' for filtering. We also create an index
-      // variable to go into arrays.
-      if (process.env.SPELLCHECKER_PREFER_HUNSPELL) {
-        spellType = 'hunspell';
-        spellIndex = 0;
-      } else if (process.platform === 'darwin') {
-        spellType = 'mac';
-        spellIndex = 1;
-      } else if (process.platform === 'win32') {
-        spellType = 'win';
-        spellIndex = 2;
-      } else {
-        spellType = 'hunspell';
-        spellIndex = 0;
-      }
-    }
-    return checker;
-  };
 }
+
+// The module-level API delegates to a single lazily-created spellchecker (see
+// `ensureDefaultSpellCheck` in lib/spellchecker.js). That instance is global to
+// the process, so these live outside the loop above — running them twice would
+// mean the second pass no longer exercises the uninitialized case. They're also
+// order-dependent: the lazy-init spec has to be the first module-level call.
+describe('the default spellchecker', () => {
+  it('lazily constructs itself on first use', () => {
+    // Nothing has touched the singleton yet. If `ensureDefaultSpellCheck`
+    // returns nothing, every wrapper below dies on a property access instead.
+    expect(typeof spellchecker.isMisspelled('cheese')).toBe('boolean');
+  });
+
+  it('reuses the same instance across calls', () => {
+    // NB: Windows spellchecker cannot remove words, and since it holds onto
+    // words, rerunning this test >1 time causes it to incorrectly fail
+    if (process.platform === 'win32') return;
+
+    expect(spellchecker.setDictionary('en_US', dictionaryDirectory)).toBe(true);
+    expect(spellchecker.isMisspelled('wwoorrdd')).toBe(true);
+
+    // Only visible on a later call if the singleton is memoized rather than
+    // rebuilt each time.
+    spellchecker.add('wwoorrdd');
+    expect(spellchecker.isMisspelled('wwoorrdd')).toBe(false);
+
+    spellchecker.remove('wwoorrdd');
+    expect(spellchecker.isMisspelled('wwoorrdd')).toBe(true);
+  });
+
+  it('checks spelling through the singleton', () => {
+    spellchecker.setDictionary('en_US', dictionaryDirectory);
+    expect(spellchecker.checkSpelling('cat caat dog dooog')).toEqual([
+      { start: 4, end: 8 },
+      { start: 13, end: 18 }
+    ]);
+  });
+
+  it('checks spelling asynchronously through the singleton', () => {
+    spellchecker.setDictionary('en_US', dictionaryDirectory);
+
+    let ranges = null;
+    spellchecker.checkSpellingAsync('cat caat dog dooog').then(r => ranges = r);
+
+    waitsFor(() => ranges !== null);
+
+    runs(() => expect(ranges).toEqual([
+      { start: 4, end: 8 },
+      { start: 13, end: 18 }
+    ]));
+  });
+
+  it('returns corrections through the singleton', () => {
+    spellchecker.setDictionary('en_US', dictionaryDirectory);
+    const corrections = spellchecker.getCorrectionsForMisspelling('worrd');
+    expect(Array.isArray(corrections)).toBe(true);
+    expect(corrections.length).toBeGreaterThan(0);
+  });
+
+  it('resolves a bundled dictionary directory', () => {
+    // Not routed through the singleton, but `ensureDefaultSpellCheck` depends
+    // on it returning something real.
+    const dictPath = spellchecker.getDictionaryPath();
+    expect(typeof dictPath).toBe('string');
+    expect(fs.existsSync(path.join(dictPath, 'en_US.dic'))).toBe(true);
+  });
+});
