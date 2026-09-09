@@ -1,6 +1,9 @@
 .DS_Store
 build/
 node_modules/
+.cache
+.tool-versions
 npm-debug.log
 
+compile_commands.json
 package-lock.json
