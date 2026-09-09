@@ -1,8 +1,13 @@
 build/
 spec/
+.cache/
+.claude/
+.github/
 .npmignore
 .gitignore
 .DS_Store
 npm-debug.log
 appveyor.yml
 .travis.yml
+.tool-versions
+compile_commands.json
