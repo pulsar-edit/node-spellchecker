@@ -13,14 +13,13 @@
   },
   "homepage": "http://atom.github.io/node-spellchecker",
   "scripts": {
-    "test": "jasmine-focused --captureExceptions --coffee spec/"
+    "test": "jasmine-focused --captureExceptions spec/"
   },
   "devDependencies": {
     "jasmine-focused": "^1.0.7",
     "node-addon-api": "^8.8.0"
   },
   "dependencies": {
-    "node-addon-api": "8.8.0",
-    "any-promise": "^1.3.0"
+    "node-addon-api": "8.8.0"
   }
 }
